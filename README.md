@@ -1,6 +1,9 @@
 # anchor-edit
 
-Stateful single-token anchored file editing tools for coding agents. Clean port of [Dirac](https://github.com/dirac-run/dirac)'s edit primitive (anchored edits + Myers-diff reconciler).
+Stateful single-token anchored file editing tools for coding agents, bringing[^dirac-post]:
+
+- ~60% less token usage for file editing (from `O(S+R)` to `O(R)`)
+- Smaller context, better LLM reasoning
 
 ## Usage
 
@@ -23,11 +26,9 @@ The `anchor-edit mcp` subcommand exposes the editor as an MCP server for coding 
 
 - Verify: `claude mcp list`
 
-## Why
-
-Claude Code's built-in `Edit` tool costs `O(S+R)` output tokens because the model echoes the entire `old_string` search block plus the `new_string` replacement. Anchored edits collapse the search block to a single opaque token per addressed line, so cost drops to `O(R)` plus a small constant.
-
 ## Implementation
+
+Reimplements the design from [Dirac](https://github.com/dirac-run/dirac) (anchored edits + Myers-diff reconciler) in TypeScript with AI assistance.
 
 `anchor-edit` is the **stateful single-token** variant:
 
@@ -35,7 +36,7 @@ Claude Code's built-in `Edit` tool costs `O(S+R)` output tokens because the mode
 2. Per-session in-memory `Map<file_path, FileState>` (lines, anchors, used-pool words) persists across edits.
 3. After every edit, a Myers-diff reconciler reassigns anchors only on changed lines, so unchanged lines keep their identity across the session.
 
-For the full mechanism and design rationale, see Dirac's blog post [Hash Anchors + Myers Diff + Single-Token Anchors](https://dirac.run/posts/hash-anchors-myers-diff-single-token) and the [`dirac-run/dirac`](https://github.com/dirac-run/dirac) source.
+For the full mechanism and design rationale, see Dirac's blog post[^dirac-post] and the [`dirac-run/dirac`](https://github.com/dirac-run/dirac) source.
 
 ### Allocation
 
@@ -77,3 +78,9 @@ pnpm test           # bun test, all suites
 pnpm run typecheck
 pnpm run lint
 ```
+
+## Credits
+
+Original idea comes from [Dirac](https://github.com/dirac-run/dirac) (Apache-2.0).
+
+[^dirac-post]: [Hash Anchors + Myers Diff + Single-Token Anchors](https://dirac.run/posts/hash-anchors-myers-diff-single-token)
