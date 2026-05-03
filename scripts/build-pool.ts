@@ -43,7 +43,6 @@ const payload = {
   encoding: "o200k_base",
   size: pool.length,
   candidatesScanned: O200K_VOCAB_SIZE,
-  generatedAt: new Date().toISOString(),
   words: pool,
 };
 
