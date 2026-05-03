@@ -1,0 +1,73 @@
+# Release and Publish Workflow
+#
+# How it works:
+# 1. On push to main: release-please analyzes commits and either:
+#    - Creates/updates a release PR (if releasable commits exist)
+#    - Creates GitHub Releases (if a release PR was just merged)
+# 2. Publish job ONLY runs when release_created=true (after release PR merge)
+# 3. This prevents publishing old versions before the release PR is merged
+#
+# Trigger flow:
+#   Feature PR merged -> release-please creates Release PR -> (no publish)
+#   Release PR merged -> release-please creates GitHub Releases -> publish runs
+
+name: Release and Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    # Weekly fallback: catches missed triggers, enables batched releases
+    - cron: '0 0 * * 0' # Sunday 00:00 UTC
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs['.--release_created'] }}
+      tag_name: ${{ steps.release.outputs['.--tag_name'] }}
+    steps:
+      - name: Run Release Please
+        uses: googleapis/release-please-action@v4
+        id: release
+
+  # Publish to public npm
+  # Only runs when a release was created (release PR was merged)
+  publish:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
+        run: |
+          pnpm run build:pool
+          pnpm run build
+
+      - name: Publish to npm
+        run: pnpm publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
