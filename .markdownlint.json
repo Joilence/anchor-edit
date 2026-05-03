@@ -1,0 +1,20 @@
+{
+  "default": true,
+  "no-emphasis-as-heading": false,
+  "line-length": false,
+  "no-blanks-blockquote": false,
+  "fenced-code-language": false,
+  "no-duplicate-heading": false,
+  "no-inline-html": false,
+  "first-line-heading": false,
+  "descriptive-link-text": false,
+  "MD007": {
+    "indent": 4
+  },
+  "MD025": {
+    "front_matter_title": ""
+  },
+  "MD060": {
+    "style": "consistent"
+  }
+}

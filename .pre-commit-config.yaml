@@ -1,0 +1,39 @@
+repos:
+  - repo: https://github.com/biomejs/pre-commit
+    rev: v2.3.11
+    hooks:
+      - id: biome-check
+        additional_dependencies: ["@biomejs/biome@2.3.11"]
+        files: \.(ts|tsx|js|jsx|json)$
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.21
+    hooks:
+      - id: mdformat
+        args: [--number]
+        exclude: (SKILL|CLAUDE|AGENTS)\.md$
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-mkdocs
+          - mdformat-footnote
+          - mdformat-frontmatter
+          - mdformat-simple-breaks
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.19.1
+    hooks:
+      - id: markdownlint-cli2
+        args: [--fix]
+        exclude: (SKILL|CLAUDE|AGENTS)\.md$
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        exclude: pnpm-lock\.yaml$
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.21.0
+    hooks:
+      - id: yamlfmt
+        exclude: pnpm-lock\.yaml$
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
