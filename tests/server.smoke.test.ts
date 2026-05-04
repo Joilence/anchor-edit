@@ -132,6 +132,37 @@ describe("MCP server smoke", () => {
       await close();
     }
   });
+  test("edit_anchored rejects end_anchor outside replace mode", async () => {
+    const path = join(dir, "x.py");
+    writeFileSync(path, "alpha\nbeta\ngamma", "utf8");
+    const { client, close } = await setupClient();
+    try {
+      const read = asToolResult(
+        await client.callTool({ name: "read_anchored", arguments: { file_path: path } })
+      );
+      const lines = (read.content[0]?.text ?? "").split("\n");
+      const betaAnchor = (lines[1] ?? "").split(ANCHOR_SEPARATOR)[0] ?? "";
+      const gammaAnchor = (lines[2] ?? "").split(ANCHOR_SEPARATOR)[0] ?? "";
+      const result = asToolResult(
+        await client.callTool({
+          name: "edit_anchored",
+          arguments: {
+            file_path: path,
+            start_anchor: betaAnchor,
+            end_anchor: gammaAnchor,
+            new_content: "before",
+            mode: "insert_before",
+          },
+        })
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("end_anchor is only valid with mode=replace");
+      expect(readFileSync(path, "utf8")).toBe("alpha\nbeta\ngamma");
+    } finally {
+      await close();
+    }
+  });
+
   test("edit_anchored hints when new_content has literal backslash-n but no real newline", async () => {
     const path = join(dir, "x.py");
     writeFileSync(path, "alpha\nbeta\ngamma", "utf8");

@@ -7,7 +7,9 @@ Stateful single-token anchored file editing tools for coding agents, bringing[^d
 
 ## Usage
 
-The `anchor-edit mcp` subcommand exposes the editor as an MCP server for coding agents like Claude Code. For example, with Claude Code:
+The `anchor-edit mcp` subcommand exposes the editor as an MCP server for coding agents like Claude Code.
+
+### Claude Code as MCP
 
 - CLI: `claude mcp add anchor-edit --scope user -- npx -y anchor-edit mcp`
 
@@ -25,6 +27,28 @@ The `anchor-edit mcp` subcommand exposes the editor as an MCP server for coding 
     ```
 
 - Verify: `claude mcp list`
+
+### Pi coding agent as extension
+
+`anchor-edit` also ships a native [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) extension.
+
+```sh
+pi install npm:anchor-edit
+```
+
+Restart pi, or run `/reload` in an existing pi session. The extension registers:
+
+1. `read_anchored`
+2. `edit_anchored`
+3. `write_to_file`
+
+Paths may be relative to pi's current working directory or absolute. The extension keeps anchor state in memory for the active pi runtime. After `/reload`, restart, `/new`, `/resume`, or `/fork`, call `read_anchored` again before `edit_anchored`.
+
+For local development from this repository:
+
+```sh
+pi -e ./src/pi-extension.ts
+```
 
 ## Implementation
 
@@ -44,7 +68,7 @@ Mirrors Dirac's `AnchorStateManager`. Implementation: [`src/state.ts`](src/state
 
 1. Each file has its own monotonically growing `usedWords` set. Anchors are pulled from the pool in order on first allocation; deleted lines do **not** return their anchors to the pool.
 2. When the pool (6,744 words from `o200k_base`) is exhausted, the allocator falls back to random two-word combinations (`MorelloMagnificent`); on collision, three-word, then four-word.
-3. Line splitting is `/\r?\n/` (CRLF tolerated); writes always emit `\n`.
+3. Line splitting is `/\r?\n/` (CRLF tolerated). Anchored edits rewrite logical lines with `\n`; `write_to_file` writes content as supplied.
 
 ### Tools
 
