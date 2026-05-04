@@ -1,0 +1,291 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type {
+  AgentToolResult,
+  ExtensionContext,
+  ToolDefinition,
+} from "@mariozechner/pi-coding-agent";
+import type { Static, TSchema } from "typebox";
+import { type PiToolRegistrar, registerAnchorEditPiTools } from "../src/pi-extension.js";
+import { ANCHOR_SEPARATOR } from "../src/pool.js";
+
+interface CapturedTool {
+  name: string;
+  prepareArguments?: (args: unknown) => unknown;
+  execute: (params: unknown, ctx: ExtensionContext) => Promise<AgentToolResult<unknown>>;
+}
+
+function captureTool<TParams extends TSchema, TDetails, TState>(
+  tool: ToolDefinition<TParams, TDetails, TState>
+): CapturedTool {
+  return {
+    name: tool.name,
+    prepareArguments: tool.prepareArguments,
+    execute: (params, ctx) =>
+      tool.execute("test", params as Static<TParams>, undefined, undefined, ctx),
+  };
+}
+
+function collectTools(): Map<string, CapturedTool> {
+  const tools = new Map<string, CapturedTool>();
+  const registrar: PiToolRegistrar = {
+    registerTool(tool) {
+      const captured = captureTool(tool);
+      tools.set(captured.name, captured);
+    },
+  };
+  registerAnchorEditPiTools(registrar);
+  return tools;
+}
+
+function getTool(tools: Map<string, CapturedTool>, name: string): CapturedTool {
+  const tool = tools.get(name);
+  if (!tool) throw new Error(`Missing tool: ${name}`);
+  return tool;
+}
+
+function context(cwd: string): ExtensionContext {
+  return { cwd } as ExtensionContext;
+}
+
+function resultText(result: AgentToolResult<unknown>): string {
+  const first = result.content[0];
+  if (first?.type !== "text") throw new Error("Expected text result");
+  return first.text;
+}
+
+function anchorAt(result: AgentToolResult<unknown>, index: number): string {
+  const line = resultText(result).split("\n")[index];
+  if (line === undefined) throw new Error(`Missing anchored line at index ${index}`);
+  const anchor = line.split(ANCHOR_SEPARATOR)[0];
+  if (!anchor) throw new Error(`Missing anchor at index ${index}`);
+  return anchor;
+}
+
+async function rejectionMessage(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  throw new Error("Expected promise to reject");
+}
+
+describe("pi extension", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "anchor-edit-pi-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("registers the three anchored tools", () => {
+    const tools = collectTools();
+    expect([...tools.keys()].sort()).toEqual(["edit_anchored", "read_anchored", "write_to_file"]);
+  });
+
+  test("read_anchored resolves relative paths from pi cwd", async () => {
+    writeFileSync(join(dir, "a.txt"), "alpha\nbeta", "utf8");
+    const readTool = getTool(collectTools(), "read_anchored");
+
+    const result = await readTool.execute({ path: "a.txt" }, context(dir));
+
+    const text = resultText(result);
+    expect(text).toContain(`${ANCHOR_SEPARATOR}alpha`);
+    expect(text).toContain(`${ANCHOR_SEPARATOR}beta`);
+  });
+
+  test("read_anchored resolves absolute and @-prefixed paths", async () => {
+    const absolutePath = join(dir, "absolute.txt");
+    writeFileSync(absolutePath, "absolute", "utf8");
+    writeFileSync(join(dir, "at-relative.txt"), "at-relative", "utf8");
+    const atAbsolutePath = join(dir, "at-absolute.txt");
+    writeFileSync(atAbsolutePath, "at-absolute", "utf8");
+    const readTool = getTool(collectTools(), "read_anchored");
+
+    expect(resultText(await readTool.execute({ path: absolutePath }, context("/")))).toContain(
+      `${ANCHOR_SEPARATOR}absolute`
+    );
+    expect(
+      resultText(await readTool.execute({ path: "@at-relative.txt" }, context(dir)))
+    ).toContain(`${ANCHOR_SEPARATOR}at-relative`);
+    expect(
+      resultText(await readTool.execute({ path: `@${atAbsolutePath}` }, context("/")))
+    ).toContain(`${ANCHOR_SEPARATOR}at-absolute`);
+  });
+
+  test("read_anchored applies offset and limit", async () => {
+    writeFileSync(join(dir, "a.txt"), "alpha\nbeta\ngamma", "utf8");
+    const readTool = getTool(collectTools(), "read_anchored");
+
+    const result = await readTool.execute({ path: "a.txt", offset: 1, limit: 1 }, context(dir));
+
+    const text = resultText(result);
+    expect(text).toContain(`${ANCHOR_SEPARATOR}beta`);
+    expect(text).not.toContain("alpha");
+    expect(text).not.toContain("gamma");
+  });
+
+  test("prepareArguments accepts MCP-style file_path", () => {
+    const readTool = getTool(collectTools(), "read_anchored");
+    expect(readTool.prepareArguments?.({ file_path: "a.txt" })).toEqual({ path: "a.txt" });
+  });
+
+  test("edit_anchored uses prior anchors and updates the file", async () => {
+    const filePath = join(dir, "a.txt");
+    writeFileSync(filePath, "alpha\nbeta\ngamma", "utf8");
+    const tools = collectTools();
+    const readTool = getTool(tools, "read_anchored");
+    const editTool = getTool(tools, "edit_anchored");
+
+    const readResult = await readTool.execute({ path: "a.txt" }, context(dir));
+    const betaAnchor = anchorAt(readResult, 1);
+
+    const editResult = await editTool.execute(
+      { path: "a.txt", start_anchor: betaAnchor, new_content: "BETA" },
+      context(dir)
+    );
+
+    expect(readFileSync(filePath, "utf8")).toBe("alpha\nBETA\ngamma");
+    expect(resultText(editResult)).toContain("Edit applied. Updated lines 2-2");
+  });
+
+  test("edit_anchored inserts before an anchor", async () => {
+    const filePath = join(dir, "a.txt");
+    writeFileSync(filePath, "alpha\nbeta\ngamma", "utf8");
+    const tools = collectTools();
+    const readTool = getTool(tools, "read_anchored");
+    const editTool = getTool(tools, "edit_anchored");
+    const betaAnchor = anchorAt(await readTool.execute({ path: "a.txt" }, context(dir)), 1);
+
+    const result = await editTool.execute(
+      { path: "a.txt", start_anchor: betaAnchor, new_content: "before", mode: "insert_before" },
+      context(dir)
+    );
+
+    expect(readFileSync(filePath, "utf8")).toBe("alpha\nbefore\nbeta\ngamma");
+    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}before`);
+  });
+
+  test("edit_anchored inserts after an anchor", async () => {
+    const filePath = join(dir, "a.txt");
+    writeFileSync(filePath, "alpha\nbeta\ngamma", "utf8");
+    const tools = collectTools();
+    const readTool = getTool(tools, "read_anchored");
+    const editTool = getTool(tools, "edit_anchored");
+    const betaAnchor = anchorAt(await readTool.execute({ path: "a.txt" }, context(dir)), 1);
+
+    const result = await editTool.execute(
+      { path: "a.txt", start_anchor: betaAnchor, new_content: "after", mode: "insert_after" },
+      context(dir)
+    );
+
+    expect(readFileSync(filePath, "utf8")).toBe("alpha\nbeta\nafter\ngamma");
+    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}after`);
+  });
+
+  test("edit_anchored deletes a range with empty replacement", async () => {
+    const filePath = join(dir, "a.txt");
+    writeFileSync(filePath, "alpha\nbeta\ngamma", "utf8");
+    const tools = collectTools();
+    const readTool = getTool(tools, "read_anchored");
+    const editTool = getTool(tools, "edit_anchored");
+    const betaAnchor = anchorAt(await readTool.execute({ path: "a.txt" }, context(dir)), 1);
+
+    const result = await editTool.execute(
+      { path: "a.txt", start_anchor: betaAnchor, new_content: "", mode: "replace" },
+      context(dir)
+    );
+
+    expect(readFileSync(filePath, "utf8")).toBe("alpha\ngamma");
+    expect(resultText(result)).toContain("Edit applied. Range deleted at line 2");
+  });
+
+  test("edit_anchored replaces a multi-line range", async () => {
+    const filePath = join(dir, "a.txt");
+    writeFileSync(filePath, "alpha\nbeta\ngamma\ndelta", "utf8");
+    const tools = collectTools();
+    const readTool = getTool(tools, "read_anchored");
+    const editTool = getTool(tools, "edit_anchored");
+    const readResult = await readTool.execute({ path: "a.txt" }, context(dir));
+    const betaAnchor = anchorAt(readResult, 1);
+    const gammaAnchor = anchorAt(readResult, 2);
+
+    const result = await editTool.execute(
+      {
+        path: "a.txt",
+        start_anchor: betaAnchor,
+        end_anchor: gammaAnchor,
+        new_content: "BETA-GAMMA",
+        mode: "replace",
+      },
+      context(dir)
+    );
+
+    expect(readFileSync(filePath, "utf8")).toBe("alpha\nBETA-GAMMA\ndelta");
+    expect(resultText(result)).toContain("Edit applied. Updated lines 2-2");
+    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}BETA-GAMMA`);
+  });
+
+  test("edit_anchored rejects end_anchor outside replace mode", async () => {
+    const filePath = join(dir, "a.txt");
+    writeFileSync(filePath, "alpha\nbeta\ngamma", "utf8");
+    const tools = collectTools();
+    const readTool = getTool(tools, "read_anchored");
+    const editTool = getTool(tools, "edit_anchored");
+    const readResult = await readTool.execute({ path: "a.txt" }, context(dir));
+    const betaAnchor = anchorAt(readResult, 1);
+    const gammaAnchor = anchorAt(readResult, 2);
+
+    const message = await rejectionMessage(
+      editTool.execute(
+        {
+          path: "a.txt",
+          start_anchor: betaAnchor,
+          end_anchor: gammaAnchor,
+          new_content: "before",
+          mode: "insert_before",
+        },
+        context(dir)
+      )
+    );
+
+    expect(message).toContain("end_anchor is only valid with mode=replace");
+    expect(readFileSync(filePath, "utf8")).toBe("alpha\nbeta\ngamma");
+  });
+
+  test("edit_anchored warns on literal backslash-n without real newlines", async () => {
+    const filePath = join(dir, "a.txt");
+    writeFileSync(filePath, "alpha\nbeta\ngamma", "utf8");
+    const tools = collectTools();
+    const readTool = getTool(tools, "read_anchored");
+    const editTool = getTool(tools, "edit_anchored");
+    const betaAnchor = anchorAt(await readTool.execute({ path: "a.txt" }, context(dir)), 1);
+
+    const result = await editTool.execute(
+      { path: "a.txt", start_anchor: betaAnchor, new_content: "line one\\nline two" },
+      context(dir)
+    );
+
+    expect(readFileSync(filePath, "utf8")).toBe("alpha\nline one\\nline two\ngamma");
+    expect(resultText(result)).toContain("literal backslash-n");
+  });
+
+  test("write_to_file creates files and returns anchors", async () => {
+    const writeTool = getTool(collectTools(), "write_to_file");
+
+    const result = await writeTool.execute(
+      { path: "nested/new.txt", content: "one\ntwo" },
+      context(dir)
+    );
+
+    expect(readFileSync(join(dir, "nested/new.txt"), "utf8")).toBe("one\ntwo");
+    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}one`);
+    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}two`);
+  });
+});

@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { EDIT_MODE_DESCRIPTION } from "./descriptions.js";
 
 const absolutePath = z
   .string()
@@ -35,9 +36,7 @@ export const editAnchoredInput = z.object({
   mode: z
     .enum(["replace", "insert_before", "insert_after"])
     .default("replace")
-    .describe(
-      "replace: overwrite lines from start_anchor through end_anchor (empty new_content deletes); insert_before: insert new_content above start_anchor's line; insert_after: insert below start_anchor's line."
-    ),
+    .describe(EDIT_MODE_DESCRIPTION),
 });
 
 export const writeFileInput = z.object({
