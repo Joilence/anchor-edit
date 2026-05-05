@@ -73,8 +73,8 @@ Mirrors Dirac's `AnchorStateManager`. Implementation: [`src/state.ts`](src/state
 ### Tools
 
 1. `read_anchored`: returns file content with one anchor prefix per line in the format `<anchor>§<content>`.
-2. `edit_anchored`: replace / insert_before / insert_after by anchor; empty `new_content` with `replace` deletes the range.
-3. `write_to_file`: creates or overwrites a file; returns the rebuilt anchor map.
+2. `edit_anchored`: `replace` / `insert_before` / `insert_after` / `delete` by anchor; empty `new_content` with `mode=replace` also deletes the range.
+3. `write_to_file`: creates or overwrites a file; returns newly-allocated anchor runs (Myers-added regions). Call `read_anchored` afterwards if you need the full post-write anchor map.
 
 For multi-line `content` and `new_content`, pass real newline characters (LF, U+000A); literal backslash-n is written to the file verbatim.
 

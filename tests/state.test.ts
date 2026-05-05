@@ -155,6 +155,66 @@ describe("StateManager", () => {
     expect(result.anchors).toEqual([anchors[0], anchors[3]]);
   });
 
+  test("delete reports pre-edit affectedRange and operation=delete", () => {
+    const path = writeFile("a.txt", "alpha\nbeta\ngamma\ndelta");
+    const sm = new StateManager();
+    const { anchors } = sm.read(path);
+    const result = sm.edit({
+      filePath: path,
+      startAnchor: anchors[1],
+      endAnchor: anchors[2],
+      newContent: "",
+      mode: "delete",
+    });
+    expect(result.operation).toBe("delete");
+    expect(result.affectedRange).toEqual([1, 2]);
+    expect(result.totalLines).toBe(2);
+  });
+
+  test("replace reports post-edit affectedRange and operation=replace", () => {
+    const path = writeFile("a.txt", "alpha\nbeta\ngamma");
+    const sm = new StateManager();
+    const { anchors } = sm.read(path);
+    const result = sm.edit({
+      filePath: path,
+      startAnchor: anchors[1],
+      newContent: "B1\nB2\nB3",
+      mode: "replace",
+    });
+    expect(result.operation).toBe("replace");
+    expect(result.affectedRange).toEqual([1, 3]);
+    expect(result.totalLines).toBe(5);
+  });
+
+  test("write returns addedRanges covering the whole file on first write", () => {
+    const path = join(dir, "fresh.txt");
+    const sm = new StateManager();
+    const result = sm.write(path, "x\ny\nz");
+    expect(result.totalLines).toBe(3);
+    expect(result.addedRanges).toHaveLength(1);
+    expect(result.addedRanges[0]?.startIdx).toBe(0);
+    expect(result.addedRanges[0]?.anchors).toHaveLength(3);
+  });
+
+  test("write returns only Myers-added runs when overwriting a cached file", () => {
+    const path = writeFile("a.txt", "alpha\nbeta\ngamma\ndelta");
+    const sm = new StateManager();
+    sm.read(path);
+    const result = sm.write(path, "alpha\nBETA\ngamma\ndelta");
+    expect(result.totalLines).toBe(4);
+    expect(result.addedRanges).toHaveLength(1);
+    expect(result.addedRanges[0]?.startIdx).toBe(1);
+    expect(result.addedRanges[0]?.anchors).toHaveLength(1);
+  });
+
+  test("write of identical content returns no addedRanges", () => {
+    const path = writeFile("a.txt", "alpha\nbeta");
+    const sm = new StateManager();
+    sm.read(path);
+    const result = sm.write(path, "alpha\nbeta");
+    expect(result.addedRanges).toEqual([]);
+  });
+
   test("insert_before adds lines above the anchor", () => {
     const path = writeFile("a.txt", "alpha\nbeta");
     const sm = new StateManager();
@@ -443,5 +503,82 @@ describe("StateManager", () => {
     sm.reset();
     const ra = sm.read(a);
     expect(ra.lines).toEqual(["alpha"]);
+  });
+
+  test("edit returns originalRange and originalLines for replace", () => {
+    const path = writeFile("a.txt", "one\ntwo\nthree\nfour\nfive");
+    const sm = new StateManager();
+    const initial = sm.read(path);
+    const twoAnchor = initial.anchors[1];
+    if (!twoAnchor) throw new Error("missing anchor");
+    const result = sm.edit({
+      filePath: path,
+      startAnchor: twoAnchor,
+      newContent: "TWO",
+      mode: "replace",
+    });
+    expect(result.originalRange).toEqual([1, 1]);
+    expect(result.originalLines).toEqual(["one", "two", "three", "four", "five"]);
+    expect(result.originalAnchors[1]).toBe(twoAnchor);
+    expect(result.postAfterStart).toBe(2);
+    expect(result.affectedRange).toEqual([1, 1]);
+    expect(result.operation).toBe("replace");
+  });
+
+  test("edit returns null originalRange for insert_before", () => {
+    const path = writeFile("a.txt", "one\ntwo\nthree");
+    const sm = new StateManager();
+    const initial = sm.read(path);
+    const twoAnchor = initial.anchors[1];
+    if (!twoAnchor) throw new Error("missing anchor");
+    const result = sm.edit({
+      filePath: path,
+      startAnchor: twoAnchor,
+      newContent: "BEFORE",
+      mode: "insert_before",
+    });
+    expect(result.originalRange).toBeNull();
+    expect(result.operation).toBe("insert");
+    expect(result.affectedRange).toEqual([1, 1]);
+    expect(result.postAfterStart).toBe(2);
+  });
+
+  test("edit returns null originalRange for insert_after", () => {
+    const path = writeFile("a.txt", "one\ntwo\nthree");
+    const sm = new StateManager();
+    const initial = sm.read(path);
+    const twoAnchor = initial.anchors[1];
+    if (!twoAnchor) throw new Error("missing anchor");
+    const result = sm.edit({
+      filePath: path,
+      startAnchor: twoAnchor,
+      newContent: "AFTER",
+      mode: "insert_after",
+    });
+    expect(result.originalRange).toBeNull();
+    expect(result.operation).toBe("insert");
+    expect(result.affectedRange).toEqual([2, 2]);
+    expect(result.postAfterStart).toBe(3);
+  });
+
+  test("edit returns delete metadata for empty replace", () => {
+    const path = writeFile("a.txt", "one\ntwo\nthree\nfour");
+    const sm = new StateManager();
+    const initial = sm.read(path);
+    const twoAnchor = initial.anchors[1];
+    const threeAnchor = initial.anchors[2];
+    if (!twoAnchor || !threeAnchor) throw new Error("missing anchor");
+    const result = sm.edit({
+      filePath: path,
+      startAnchor: twoAnchor,
+      endAnchor: threeAnchor,
+      newContent: "",
+      mode: "replace",
+    });
+    expect(result.operation).toBe("delete");
+    expect(result.originalRange).toEqual([1, 2]);
+    expect(result.affectedRange).toEqual([1, 2]);
+    expect(result.postAfterStart).toBe(1);
+    expect(result.originalLines.slice(1, 3)).toEqual(["two", "three"]);
   });
 });

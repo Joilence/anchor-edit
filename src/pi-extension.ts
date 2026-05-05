@@ -5,10 +5,13 @@ import { type Static, Type } from "typebox";
 import {
   EDIT_ANCHORED_DESCRIPTION,
   EDIT_MODE_DESCRIPTION,
+  END_ANCHOR_DESCRIPTION,
+  NEW_CONTENT_DESCRIPTION,
   READ_ANCHORED_DESCRIPTION,
+  START_ANCHOR_DESCRIPTION,
   WRITE_TO_FILE_DESCRIPTION,
 } from "./descriptions.js";
-import { formatEditAppliedText, formatLines } from "./format.js";
+import { buildEditResult, buildReadResult, buildWriteResult } from "./format.js";
 import { ANCHOR_SEPARATOR } from "./pool.js";
 import { AnchorEditError, EDIT_MODES, StateManager } from "./state.js";
 
@@ -51,7 +54,7 @@ const writeFileParams = Type.Object({
   path: pathInput,
   content: Type.String({
     description:
-      "Full new content for the file. Overwrites any existing content and returns the rebuilt anchor map.",
+      "Full new content for the file. Overwrites any existing content. The response reports total_lines plus newly-allocated anchor runs; unchanged lines keep their prior anchors and are not re-emitted.",
   }),
 });
 
@@ -108,9 +111,10 @@ export function registerAnchorEditPiTools(
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const path = resolveToolPath(params.path, ctx.cwd);
       return withFileMutationQueue(path, async () => {
-        const { lines, anchors } = state.read(path, params.offset, params.limit);
+        const result = state.read(path, params.offset, params.limit);
+        const { text } = buildReadResult(result, result.totalLines);
         return {
-          content: [{ type: "text", text: formatLines(anchors, lines) }],
+          content: [{ type: "text", text }],
           details: undefined,
         };
       });
@@ -143,11 +147,12 @@ export function registerAnchorEditPiTools(
           filePath: path,
           startAnchor: params.start_anchor,
           endAnchor: params.end_anchor,
-          newContent: params.new_content,
+          newContent: params.new_content ?? "",
           mode,
         });
+        const { text } = buildEditResult(result, params.new_content ?? "");
         return {
-          content: [{ type: "text", text: formatEditAppliedText(result, params.new_content) }],
+          content: [{ type: "text", text }],
           details: undefined,
         };
       });
@@ -167,9 +172,10 @@ export function registerAnchorEditPiTools(
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const path = resolveToolPath(params.path, ctx.cwd);
       return withFileMutationQueue(path, async () => {
-        const { lines, anchors } = state.write(path, params.content);
+        const result = state.write(path, params.content);
+        const { text } = buildWriteResult(result.lines.length, result.addedRanges);
         return {
-          content: [{ type: "text", text: formatLines(anchors, lines) }],
+          content: [{ type: "text", text }],
           details: undefined,
         };
       });
