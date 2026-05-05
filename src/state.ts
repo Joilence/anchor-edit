@@ -25,7 +25,8 @@ export class AnchorEditError extends Error {
   }
 }
 
-export type EditMode = "replace" | "insert_before" | "insert_after";
+export const EDIT_MODES = ["replace", "insert_before", "insert_after", "delete"] as const;
+export type EditMode = (typeof EDIT_MODES)[number];
 
 export interface EditArgs {
   filePath: string;
@@ -38,10 +39,27 @@ export interface EditArgs {
 export interface ReadResult {
   lines: string[];
   anchors: string[];
+  totalLines: number;
 }
+
+export interface AddedRange {
+  startIdx: number;
+  anchors: string[];
+}
+
+export type EditOperation = "replace" | "insert" | "delete";
 
 export interface EditResult extends ReadResult {
   affectedRange: [number, number];
+  originalRange: [number, number] | null;
+  originalLines: string[];
+  originalAnchors: string[];
+  postAfterStart: number;
+  operation: EditOperation;
+}
+
+export interface WriteResult extends ReadResult {
+  addedRanges: AddedRange[];
 }
 
 export interface StateManagerOptions {
@@ -82,17 +100,20 @@ export class StateManager {
   }
 
   read(filePath: string, offset?: number, limit?: number): ReadResult {
-    const state = this.loadAndSync(filePath);
+    const { state } = this.loadAndSync(filePath);
     const start = offset ?? 0;
     const end = limit !== undefined ? start + limit : state.lines.length;
     return {
       lines: state.lines.slice(start, end),
       anchors: state.anchorByLine.slice(start, end),
+      totalLines: state.lines.length,
     };
   }
 
   edit(args: EditArgs): EditResult {
-    const state = this.loadAndSync(args.filePath);
+    const { state } = this.loadAndSync(args.filePath);
+    const mode: Exclude<EditMode, "delete"> = args.mode === "delete" ? "replace" : args.mode;
+    const newContent = args.mode === "delete" ? "" : args.newContent;
 
     const startIdx = state.anchorByLine.indexOf(args.startAnchor);
     if (startIdx < 0) {
@@ -103,7 +124,7 @@ export class StateManager {
     }
 
     let endIdx = startIdx;
-    if (args.mode === "replace") {
+    if (mode === "replace") {
       const endAnchor = args.endAnchor ?? args.startAnchor;
       endIdx = state.anchorByLine.indexOf(endAnchor);
       if (endIdx < 0) {
@@ -121,24 +142,46 @@ export class StateManager {
     }
 
     const insertedLines =
-      args.newContent === "" && args.mode === "replace" ? [] : args.newContent.split(LINE_SPLIT);
+      newContent === "" && mode === "replace" ? [] : newContent.split(LINE_SPLIT);
 
+    const isDelete = insertedLines.length === 0 && mode === "replace";
+    const operation: EditOperation = isDelete
+      ? "delete"
+      : mode === "replace"
+        ? "replace"
+        : "insert";
+    const originalLines = [...state.lines];
+    const originalAnchors = [...state.anchorByLine];
     let updatedLines: string[];
     let affectedStart: number;
-    if (args.mode === "replace") {
+    let affectedEnd: number;
+    let originalRange: [number, number] | null;
+    let postAfterStart: number;
+    if (mode === "replace") {
       updatedLines = [
         ...state.lines.slice(0, startIdx),
         ...insertedLines,
         ...state.lines.slice(endIdx + 1),
       ];
-      affectedStart = startIdx;
-    } else if (args.mode === "insert_before") {
+      if (isDelete) {
+        affectedStart = startIdx;
+        affectedEnd = endIdx;
+      } else {
+        affectedStart = startIdx;
+        affectedEnd = startIdx + insertedLines.length - 1;
+      }
+      originalRange = [startIdx, endIdx];
+      postAfterStart = startIdx + insertedLines.length;
+    } else if (mode === "insert_before") {
       updatedLines = [
         ...state.lines.slice(0, startIdx),
         ...insertedLines,
         ...state.lines.slice(startIdx),
       ];
       affectedStart = startIdx;
+      affectedEnd = startIdx + insertedLines.length - 1;
+      originalRange = null;
+      postAfterStart = startIdx + insertedLines.length;
     } else {
       updatedLines = [
         ...state.lines.slice(0, startIdx + 1),
@@ -146,6 +189,9 @@ export class StateManager {
         ...state.lines.slice(startIdx + 1),
       ];
       affectedStart = startIdx + 1;
+      affectedEnd = startIdx + insertedLines.length;
+      originalRange = null;
+      postAfterStart = startIdx + 1 + insertedLines.length;
     }
 
     const newHadTrailingNewline = updatedLines.length > 0 && state.hadTrailingNewline;
@@ -161,18 +207,29 @@ export class StateManager {
       throw err;
     }
 
-    const affectedEnd = affectedStart + insertedLines.length - 1;
     return {
       lines: [...state.lines],
       anchors: [...state.anchorByLine],
+      totalLines: state.lines.length,
       affectedRange: [affectedStart, affectedEnd],
+      originalRange,
+      originalLines,
+      originalAnchors,
+      postAfterStart,
+      operation,
     };
   }
 
-  write(filePath: string, content: string): ReadResult {
+  write(filePath: string, content: string): WriteResult {
     const abs = resolvePath(filePath);
     this.writeFile(abs, content);
-    return this.read(abs);
+    const { state, addedRanges } = this.loadAndSync(abs);
+    return {
+      lines: [...state.lines],
+      anchors: [...state.anchorByLine],
+      totalLines: state.lines.length,
+      addedRanges,
+    };
   }
 
   reset(filePath?: string): void {
@@ -192,7 +249,7 @@ export class StateManager {
     }
   }
 
-  private loadAndSync(filePath: string): FileState {
+  private loadAndSync(filePath: string): { state: FileState; addedRanges: AddedRange[] } {
     const abs = resolvePath(filePath);
     let buffer: Buffer;
     try {
@@ -203,8 +260,12 @@ export class StateManager {
     let content: string;
     try {
       content = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-    } catch {
-      throw new AnchorEditError(`File appears to be binary or non-UTF-8: ${abs}`, "BINARY_FILE");
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new AnchorEditError(
+        `File appears to be binary or non-UTF-8: ${abs} (${detail})`,
+        "BINARY_FILE"
+      );
     }
     const { lines, hadTrailingNewline } = splitLogicalLines(content);
 
@@ -221,28 +282,40 @@ export class StateManager {
       };
       fresh.anchorByLine = lines.map(() => this.allocate(fresh));
       this.files.set(abs, fresh);
-      return fresh;
+      const addedRanges: AddedRange[] =
+        lines.length > 0 ? [{ startIdx: 0, anchors: [...fresh.anchorByLine] }] : [];
+      return { state: fresh, addedRanges };
     }
 
     if (existing.content !== content) {
-      this.reconcile(existing, lines);
+      const addedRanges = this.reconcile(existing, lines);
       existing.content = content;
       existing.hadTrailingNewline = hadTrailingNewline;
+      return { state: existing, addedRanges };
     }
-    return existing;
+    return { state: existing, addedRanges: [] };
   }
 
-  private reconcile(state: FileState, newLines: string[]): void {
+  private reconcile(state: FileState, newLines: string[]): AddedRange[] {
     const oldAnchors = state.anchorByLine;
     const diff = diffArrays(state.lines, newLines);
 
     const newAnchors: string[] = [];
+    const addedRanges: AddedRange[] = [];
     let oldIdx = 0;
+    let newIdx = 0;
 
     for (const part of diff) {
       const len = part.value.length;
       if (part.added) {
-        for (let i = 0; i < len; i++) newAnchors.push(this.allocate(state));
+        const runAnchors: string[] = [];
+        for (let i = 0; i < len; i++) {
+          const a = this.allocate(state);
+          runAnchors.push(a);
+          newAnchors.push(a);
+        }
+        addedRanges.push({ startIdx: newIdx, anchors: runAnchors });
+        newIdx += len;
       } else if (part.removed) {
         oldIdx += len;
       } else {
@@ -251,6 +324,7 @@ export class StateManager {
           newAnchors.push(a ?? this.allocate(state));
         }
         oldIdx += len;
+        newIdx += len;
       }
     }
 
@@ -263,6 +337,7 @@ export class StateManager {
 
     state.lines = newLines;
     state.anchorByLine = newAnchors;
+    return addedRanges;
   }
 
   private allocate(state: FileState): string {

@@ -5,8 +5,15 @@ import {
   READ_ANCHORED_DESCRIPTION,
   WRITE_TO_FILE_DESCRIPTION,
 } from "./descriptions.js";
-import { formatEditAppliedText, formatLines } from "./format.js";
-import { editAnchoredInput, readAnchoredInput, writeFileInput } from "./schemas.js";
+import { buildEditResult, buildReadResult, buildWriteResult } from "./format.js";
+import {
+  editAnchoredInput,
+  editAnchoredOutput,
+  readAnchoredInput,
+  readAnchoredOutput,
+  writeFileInput,
+  writeFileOutput,
+} from "./schemas.js";
 import { AnchorEditError, StateManager } from "./state.js";
 
 export function buildServer(state: StateManager = new StateManager()): McpServer {
@@ -17,11 +24,16 @@ export function buildServer(state: StateManager = new StateManager()): McpServer
     {
       description: READ_ANCHORED_DESCRIPTION,
       inputSchema: readAnchoredInput.shape,
+      outputSchema: readAnchoredOutput.shape,
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
     async (input: z.infer<typeof readAnchoredInput>) => {
-      const { lines, anchors } = state.read(input.file_path, input.offset, input.limit);
-      return { content: [{ type: "text", text: formatLines(anchors, lines) }] };
+      const result = state.read(input.file_path, input.offset, input.limit);
+      const { text, structured } = buildReadResult(result, result.totalLines);
+      return {
+        content: [{ type: "text", text }],
+        structuredContent: structured,
+      };
     }
   );
 
@@ -30,10 +42,14 @@ export function buildServer(state: StateManager = new StateManager()): McpServer
     {
       description: EDIT_ANCHORED_DESCRIPTION,
       inputSchema: editAnchoredInput.shape,
+      outputSchema: editAnchoredOutput.shape,
     },
     async (input: z.infer<typeof editAnchoredInput>) => {
-      if (input.end_anchor !== undefined && input.mode !== "replace") {
-        throw new AnchorEditError("end_anchor is only valid with mode=replace.", "INVALID_RANGE");
+      if (input.end_anchor !== undefined && input.mode !== "replace" && input.mode !== "delete") {
+        throw new AnchorEditError(
+          "end_anchor is only valid with mode=replace or mode=delete.",
+          "INVALID_RANGE"
+        );
       }
 
       const result = state.edit({
@@ -43,8 +59,10 @@ export function buildServer(state: StateManager = new StateManager()): McpServer
         newContent: input.new_content,
         mode: input.mode,
       });
+      const { text, structured } = buildEditResult(result, input.new_content);
       return {
-        content: [{ type: "text", text: formatEditAppliedText(result, input.new_content) }],
+        content: [{ type: "text", text }],
+        structuredContent: structured,
       };
     }
   );
@@ -54,10 +72,15 @@ export function buildServer(state: StateManager = new StateManager()): McpServer
     {
       description: WRITE_TO_FILE_DESCRIPTION,
       inputSchema: writeFileInput.shape,
+      outputSchema: writeFileOutput.shape,
     },
     async (input: z.infer<typeof writeFileInput>) => {
-      const { lines, anchors } = state.write(input.file_path, input.content);
-      return { content: [{ type: "text", text: formatLines(anchors, lines) }] };
+      const result = state.write(input.file_path, input.content);
+      const { text, structured } = buildWriteResult(result.lines.length, result.addedRanges);
+      return {
+        content: [{ type: "text", text }],
+        structuredContent: structured,
+      };
     }
   );
 

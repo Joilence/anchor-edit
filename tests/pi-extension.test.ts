@@ -152,7 +152,7 @@ describe("pi extension", () => {
     );
 
     expect(readFileSync(filePath, "utf8")).toBe("alpha\nBETA\ngamma");
-    expect(resultText(editResult)).toContain("Edit applied. Updated lines 2-2");
+    expect(resultText(editResult)).toContain("Edit applied. Lines 2-2.");
   });
 
   test("edit_anchored inserts before an anchor", async () => {
@@ -169,7 +169,9 @@ describe("pi extension", () => {
     );
 
     expect(readFileSync(filePath, "utf8")).toBe("alpha\nbefore\nbeta\ngamma");
-    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}before`);
+    expect(resultText(result)).toContain("Edit applied. Lines 2-2.");
+    const after = await readTool.execute({ path: "a.txt" }, context(dir));
+    expect(resultText(after).split("\n")[1]).toContain(`${ANCHOR_SEPARATOR}before`);
   });
 
   test("edit_anchored inserts after an anchor", async () => {
@@ -186,7 +188,9 @@ describe("pi extension", () => {
     );
 
     expect(readFileSync(filePath, "utf8")).toBe("alpha\nbeta\nafter\ngamma");
-    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}after`);
+    expect(resultText(result)).toContain("Edit applied. Lines 3-3.");
+    const after = await readTool.execute({ path: "a.txt" }, context(dir));
+    expect(resultText(after).split("\n")[2]).toContain(`${ANCHOR_SEPARATOR}after`);
   });
 
   test("edit_anchored deletes a range with empty replacement", async () => {
@@ -203,7 +207,7 @@ describe("pi extension", () => {
     );
 
     expect(readFileSync(filePath, "utf8")).toBe("alpha\ngamma");
-    expect(resultText(result)).toContain("Edit applied. Range deleted at line 2");
+    expect(resultText(result)).toContain("Edit applied. Lines 2-2 deleted.");
   });
 
   test("edit_anchored replaces a multi-line range", async () => {
@@ -228,8 +232,9 @@ describe("pi extension", () => {
     );
 
     expect(readFileSync(filePath, "utf8")).toBe("alpha\nBETA-GAMMA\ndelta");
-    expect(resultText(result)).toContain("Edit applied. Updated lines 2-2");
-    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}BETA-GAMMA`);
+    expect(resultText(result)).toContain("Edit applied. Lines 2-2.");
+    const after = await readTool.execute({ path: "a.txt" }, context(dir));
+    expect(resultText(after).split("\n")[1]).toContain(`${ANCHOR_SEPARATOR}BETA-GAMMA`);
   });
 
   test("edit_anchored rejects end_anchor outside replace mode", async () => {
@@ -277,7 +282,9 @@ describe("pi extension", () => {
   });
 
   test("write_to_file creates files and returns anchors", async () => {
-    const writeTool = getTool(collectTools(), "write_to_file");
+    const tools = collectTools();
+    const writeTool = getTool(tools, "write_to_file");
+    const readTool = getTool(tools, "read_anchored");
 
     const result = await writeTool.execute(
       { path: "nested/new.txt", content: "one\ntwo" },
@@ -285,7 +292,10 @@ describe("pi extension", () => {
     );
 
     expect(readFileSync(join(dir, "nested/new.txt"), "utf8")).toBe("one\ntwo");
-    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}one`);
-    expect(resultText(result)).toContain(`${ANCHOR_SEPARATOR}two`);
+    expect(resultText(result)).toContain("Wrote 2 lines.");
+    const after = await readTool.execute({ path: "nested/new.txt" }, context(dir));
+    const text = resultText(after);
+    expect(text).toContain(`${ANCHOR_SEPARATOR}one`);
+    expect(text).toContain(`${ANCHOR_SEPARATOR}two`);
   });
 });

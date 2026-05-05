@@ -5,12 +5,15 @@ import { type Static, Type } from "typebox";
 import {
   EDIT_ANCHORED_DESCRIPTION,
   EDIT_MODE_DESCRIPTION,
+  END_ANCHOR_DESCRIPTION,
+  NEW_CONTENT_DESCRIPTION,
   READ_ANCHORED_DESCRIPTION,
+  START_ANCHOR_DESCRIPTION,
   WRITE_TO_FILE_DESCRIPTION,
 } from "./descriptions.js";
-import { formatEditAppliedText, formatLines } from "./format.js";
+import { buildEditResult, buildReadResult, buildWriteResult } from "./format.js";
 import { ANCHOR_SEPARATOR } from "./pool.js";
-import { AnchorEditError, StateManager } from "./state.js";
+import { AnchorEditError, EDIT_MODES, StateManager } from "./state.js";
 
 export interface PiToolRegistrar {
   registerTool: ExtensionAPI["registerTool"];
@@ -32,26 +35,16 @@ const readAnchoredParams = Type.Object({
 
 type ReadAnchoredParams = Static<typeof readAnchoredParams>;
 
-const editMode = StringEnum(["replace", "insert_before", "insert_after"] as const, {
+const editMode = StringEnum(EDIT_MODES, {
   description: EDIT_MODE_DESCRIPTION,
   default: "replace",
 });
 
 const editAnchoredParams = Type.Object({
   path: pathInput,
-  start_anchor: Type.String({
-    description: "Anchor of the first line in the edit range. Required for all modes.",
-  }),
-  end_anchor: Type.Optional(
-    Type.String({
-      description:
-        "Anchor of the last line in the edit range, inclusive. Used only for replace mode; defaults to start_anchor.",
-    })
-  ),
-  new_content: Type.String({
-    description:
-      "Replacement content. Use real LF newline characters for line breaks. Empty string with mode=replace deletes the range.",
-  }),
+  start_anchor: Type.String({ description: START_ANCHOR_DESCRIPTION }),
+  end_anchor: Type.Optional(Type.String({ description: END_ANCHOR_DESCRIPTION })),
+  new_content: Type.String({ description: NEW_CONTENT_DESCRIPTION, default: "" }),
   mode: Type.Optional(editMode),
 });
 
@@ -61,7 +54,7 @@ const writeFileParams = Type.Object({
   path: pathInput,
   content: Type.String({
     description:
-      "Full new content for the file. Overwrites any existing content and returns the rebuilt anchor map.",
+      "Full new content for the file. Overwrites any existing content. The response reports total_lines plus newly-allocated anchor runs; unchanged lines keep their prior anchors and are not re-emitted.",
   }),
 });
 
@@ -118,9 +111,10 @@ export function registerAnchorEditPiTools(
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const path = resolveToolPath(params.path, ctx.cwd);
       return withFileMutationQueue(path, async () => {
-        const { lines, anchors } = state.read(path, params.offset, params.limit);
+        const result = state.read(path, params.offset, params.limit);
+        const { text } = buildReadResult(result, result.totalLines);
         return {
-          content: [{ type: "text", text: formatLines(anchors, lines) }],
+          content: [{ type: "text", text }],
           details: undefined,
         };
       });
@@ -142,19 +136,23 @@ export function registerAnchorEditPiTools(
       const path = resolveToolPath(params.path, ctx.cwd);
       return withFileMutationQueue(path, async () => {
         const mode = params.mode ?? "replace";
-        if (params.end_anchor !== undefined && mode !== "replace") {
-          throw new AnchorEditError("end_anchor is only valid with mode=replace.", "INVALID_RANGE");
+        if (params.end_anchor !== undefined && mode !== "replace" && mode !== "delete") {
+          throw new AnchorEditError(
+            "end_anchor is only valid with mode=replace or mode=delete.",
+            "INVALID_RANGE"
+          );
         }
 
         const result = state.edit({
           filePath: path,
           startAnchor: params.start_anchor,
           endAnchor: params.end_anchor,
-          newContent: params.new_content,
+          newContent: params.new_content ?? "",
           mode,
         });
+        const { text } = buildEditResult(result, params.new_content ?? "");
         return {
-          content: [{ type: "text", text: formatEditAppliedText(result, params.new_content) }],
+          content: [{ type: "text", text }],
           details: undefined,
         };
       });
@@ -174,9 +172,10 @@ export function registerAnchorEditPiTools(
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const path = resolveToolPath(params.path, ctx.cwd);
       return withFileMutationQueue(path, async () => {
-        const { lines, anchors } = state.write(path, params.content);
+        const result = state.write(path, params.content);
+        const { text } = buildWriteResult(result.lines.length, result.addedRanges);
         return {
-          content: [{ type: "text", text: formatLines(anchors, lines) }],
+          content: [{ type: "text", text }],
           details: undefined,
         };
       });
