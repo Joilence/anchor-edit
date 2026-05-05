@@ -84,7 +84,7 @@ Edits made via anchor-edit don't render in Claude Code's native diff UI; tool re
 
 Anchor-edit's value is chained surgical edits where line stability matters. Skip it for:
 
-1. **Bulk same-string rename in one file**: prefer the host's existing replace-all tool, or a CLI command (`sed`/`sd`, `rg --replace`). Same `O(S+R)` cost, one call.
+1. **Bulk same-string rename in one file**: prefer the host's existing replace-all tool, or a CLI command (`sed`/`sd`, `rg --replace`). One tool call.
 2. **Same-string rename across many files**: prefer a CLI command (`sd`, `rg --replace`) or a one-shot script. One tool call total.
 
 ## Development
