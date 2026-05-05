@@ -32,8 +32,11 @@ export function buildServer(state: StateManager = new StateManager()): McpServer
       inputSchema: editAnchoredInput.shape,
     },
     async (input: z.infer<typeof editAnchoredInput>) => {
-      if (input.end_anchor !== undefined && input.mode !== "replace") {
-        throw new AnchorEditError("end_anchor is only valid with mode=replace.", "INVALID_RANGE");
+      if (input.end_anchor !== undefined && input.mode !== "replace" && input.mode !== "delete") {
+        throw new AnchorEditError(
+          "end_anchor is only valid with mode=replace or mode=delete.",
+          "INVALID_RANGE"
+        );
       }
 
       const result = state.edit({

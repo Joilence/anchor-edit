@@ -125,6 +125,36 @@ describe("StateManager", () => {
     expect(result.anchors).toEqual([anchors[0], anchors[3]]);
   });
 
+  test("mode=delete removes a single line and ignores new_content", () => {
+    const path = writeFile("a.txt", "alpha\nbeta\ngamma");
+    const sm = new StateManager();
+    const { anchors } = sm.read(path);
+    const result = sm.edit({
+      filePath: path,
+      startAnchor: anchors[1],
+      newContent: "ignored",
+      mode: "delete",
+    });
+    expect(result.lines).toEqual(["alpha", "gamma"]);
+    expect(result.anchors).toEqual([anchors[0], anchors[2]]);
+    expect(readFileSync(path, "utf8")).toBe("alpha\ngamma");
+  });
+
+  test("mode=delete removes a multi-line range via end_anchor", () => {
+    const path = writeFile("a.txt", "alpha\nbeta\ngamma\ndelta");
+    const sm = new StateManager();
+    const { anchors } = sm.read(path);
+    const result = sm.edit({
+      filePath: path,
+      startAnchor: anchors[1],
+      endAnchor: anchors[2],
+      newContent: "",
+      mode: "delete",
+    });
+    expect(result.lines).toEqual(["alpha", "delta"]);
+    expect(result.anchors).toEqual([anchors[0], anchors[3]]);
+  });
+
   test("insert_before adds lines above the anchor", () => {
     const path = writeFile("a.txt", "alpha\nbeta");
     const sm = new StateManager();

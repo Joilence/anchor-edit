@@ -1,6 +1,13 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { EDIT_MODE_DESCRIPTION } from "./descriptions.js";
+import {
+  CONTEXT_LINES,
+  EDIT_MODE_DESCRIPTION,
+  END_ANCHOR_DESCRIPTION,
+  NEW_CONTENT_DESCRIPTION,
+  START_ANCHOR_DESCRIPTION,
+} from "./descriptions.js";
+import { EDIT_MODES } from "./state.js";
 
 const absolutePath = z
   .string()
@@ -19,24 +26,10 @@ export const readAnchoredInput = z.object({
 
 export const editAnchoredInput = z.object({
   file_path: absolutePath.describe("Absolute path to the file."),
-  start_anchor: z
-    .string()
-    .describe("Anchor of the first line in the edit range. Required for all modes."),
-  end_anchor: z
-    .string()
-    .optional()
-    .describe(
-      "Anchor of the last line in the edit range (inclusive). Used only for replace mode; defaults to start_anchor for single-line replace."
-    ),
-  new_content: z
-    .string()
-    .describe(
-      "Replacement content. Use a real newline character (LF, U+000A) for line breaks; do not type a backslash followed by the letter n, which would be written literally to the file. Empty string with mode=replace deletes the range."
-    ),
-  mode: z
-    .enum(["replace", "insert_before", "insert_after"])
-    .default("replace")
-    .describe(EDIT_MODE_DESCRIPTION),
+  start_anchor: z.string().describe(START_ANCHOR_DESCRIPTION),
+  end_anchor: z.string().optional().describe(END_ANCHOR_DESCRIPTION),
+  new_content: z.string().default("").describe(NEW_CONTENT_DESCRIPTION),
+  mode: z.enum(EDIT_MODES).default("replace").describe(EDIT_MODE_DESCRIPTION),
 });
 
 export const writeFileInput = z.object({

@@ -247,4 +247,33 @@ describe("MCP server smoke", () => {
       await close();
     }
   });
+
+  test("edit_anchored mode=delete removes a range via end_anchor", async () => {
+    const path = join(dir, "x.py");
+    writeFileSync(path, "alpha\nbeta\ngamma\ndelta", "utf8");
+    const { client, close } = await setupClient();
+    try {
+      const read = asToolResult(
+        await client.callTool({ name: "read_anchored", arguments: { file_path: path } })
+      );
+      const lines = (read.content[0]?.text ?? "").split("\n");
+      const betaAnchor = (lines[1] ?? "").split(ANCHOR_SEPARATOR)[0] ?? "";
+      const gammaAnchor = (lines[2] ?? "").split(ANCHOR_SEPARATOR)[0] ?? "";
+      const result = asToolResult(
+        await client.callTool({
+          name: "edit_anchored",
+          arguments: {
+            file_path: path,
+            start_anchor: betaAnchor,
+            end_anchor: gammaAnchor,
+            mode: "delete",
+          },
+        })
+      );
+      expect(result.isError).toBeFalsy();
+      expect(readFileSync(path, "utf8")).toBe("alpha\ndelta");
+    } finally {
+      await close();
+    }
+  });
 });

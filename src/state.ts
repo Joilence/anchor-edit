@@ -25,7 +25,8 @@ export class AnchorEditError extends Error {
   }
 }
 
-export type EditMode = "replace" | "insert_before" | "insert_after";
+export const EDIT_MODES = ["replace", "insert_before", "insert_after", "delete"] as const;
+export type EditMode = (typeof EDIT_MODES)[number];
 
 export interface EditArgs {
   filePath: string;
@@ -93,6 +94,8 @@ export class StateManager {
 
   edit(args: EditArgs): EditResult {
     const state = this.loadAndSync(args.filePath);
+    const mode: Exclude<EditMode, "delete"> = args.mode === "delete" ? "replace" : args.mode;
+    const newContent = args.mode === "delete" ? "" : args.newContent;
 
     const startIdx = state.anchorByLine.indexOf(args.startAnchor);
     if (startIdx < 0) {
@@ -103,7 +106,7 @@ export class StateManager {
     }
 
     let endIdx = startIdx;
-    if (args.mode === "replace") {
+    if (mode === "replace") {
       const endAnchor = args.endAnchor ?? args.startAnchor;
       endIdx = state.anchorByLine.indexOf(endAnchor);
       if (endIdx < 0) {
@@ -121,18 +124,18 @@ export class StateManager {
     }
 
     const insertedLines =
-      args.newContent === "" && args.mode === "replace" ? [] : args.newContent.split(LINE_SPLIT);
+      newContent === "" && mode === "replace" ? [] : newContent.split(LINE_SPLIT);
 
     let updatedLines: string[];
     let affectedStart: number;
-    if (args.mode === "replace") {
+    if (mode === "replace") {
       updatedLines = [
         ...state.lines.slice(0, startIdx),
         ...insertedLines,
         ...state.lines.slice(endIdx + 1),
       ];
       affectedStart = startIdx;
-    } else if (args.mode === "insert_before") {
+    } else if (mode === "insert_before") {
       updatedLines = [
         ...state.lines.slice(0, startIdx),
         ...insertedLines,

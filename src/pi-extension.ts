@@ -10,7 +10,7 @@ import {
 } from "./descriptions.js";
 import { formatEditAppliedText, formatLines } from "./format.js";
 import { ANCHOR_SEPARATOR } from "./pool.js";
-import { AnchorEditError, StateManager } from "./state.js";
+import { AnchorEditError, EDIT_MODES, StateManager } from "./state.js";
 
 export interface PiToolRegistrar {
   registerTool: ExtensionAPI["registerTool"];
@@ -32,26 +32,16 @@ const readAnchoredParams = Type.Object({
 
 type ReadAnchoredParams = Static<typeof readAnchoredParams>;
 
-const editMode = StringEnum(["replace", "insert_before", "insert_after"] as const, {
+const editMode = StringEnum(EDIT_MODES, {
   description: EDIT_MODE_DESCRIPTION,
   default: "replace",
 });
 
 const editAnchoredParams = Type.Object({
   path: pathInput,
-  start_anchor: Type.String({
-    description: "Anchor of the first line in the edit range. Required for all modes.",
-  }),
-  end_anchor: Type.Optional(
-    Type.String({
-      description:
-        "Anchor of the last line in the edit range, inclusive. Used only for replace mode; defaults to start_anchor.",
-    })
-  ),
-  new_content: Type.String({
-    description:
-      "Replacement content. Use real LF newline characters for line breaks. Empty string with mode=replace deletes the range.",
-  }),
+  start_anchor: Type.String({ description: START_ANCHOR_DESCRIPTION }),
+  end_anchor: Type.Optional(Type.String({ description: END_ANCHOR_DESCRIPTION })),
+  new_content: Type.String({ description: NEW_CONTENT_DESCRIPTION, default: "" }),
   mode: Type.Optional(editMode),
 });
 
@@ -142,8 +132,11 @@ export function registerAnchorEditPiTools(
       const path = resolveToolPath(params.path, ctx.cwd);
       return withFileMutationQueue(path, async () => {
         const mode = params.mode ?? "replace";
-        if (params.end_anchor !== undefined && mode !== "replace") {
-          throw new AnchorEditError("end_anchor is only valid with mode=replace.", "INVALID_RANGE");
+        if (params.end_anchor !== undefined && mode !== "replace" && mode !== "delete") {
+          throw new AnchorEditError(
+            "end_anchor is only valid with mode=replace or mode=delete.",
+            "INVALID_RANGE"
+          );
         }
 
         const result = state.edit({
