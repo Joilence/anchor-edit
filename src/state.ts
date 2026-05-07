@@ -6,14 +6,8 @@ import { POOL } from "./pool.js";
 export type AnchorEditCode =
   | "ANCHOR_NOT_FOUND"
   | "INVALID_RANGE"
-  | "FILE_NOT_FOUND"
-  | "PERMISSION_DENIED"
-  | "IS_DIRECTORY"
   | "BINARY_FILE"
-  | "FORMAT_MISMATCH"
-  | "RECONCILE_MISMATCH"
-  | "POOL_EMPTY"
-  | "POOL_EXHAUSTED";
+  | "ANCHOR_POOL_EXHAUSTED";
 
 export class AnchorEditError extends Error {
   code: AnchorEditCode;
@@ -241,22 +235,13 @@ export class StateManager {
   }
 
   private writeFile(path: string, content: string): void {
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, content, "utf8");
-    } catch (err) {
-      translateFsError(err, path);
-    }
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content, "utf8");
   }
 
   private loadAndSync(filePath: string): { state: FileState; addedRanges: AddedRange[] } {
     const abs = resolvePath(filePath);
-    let buffer: Buffer;
-    try {
-      buffer = readFileSync(abs);
-    } catch (err) {
-      translateFsError(err, abs);
-    }
+    const buffer = readFileSync(abs);
     let content: string;
     try {
       content = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
@@ -328,13 +313,6 @@ export class StateManager {
       }
     }
 
-    if (newAnchors.length !== newLines.length) {
-      throw new AnchorEditError(
-        `Reconcile produced ${newAnchors.length} anchors for ${newLines.length} lines (internal bug).`,
-        "RECONCILE_MISMATCH"
-      );
-    }
-
     state.lines = newLines;
     state.anchorByLine = newAnchors;
     return addedRanges;
@@ -353,14 +331,7 @@ export class StateManager {
     for (let attempt = 0; attempt < MULTIWORD_MAX_TRIES; attempt++) {
       const pieces: string[] = [];
       for (let i = 0; i < parts; i++) {
-        const word = this.pool[Math.floor(Math.random() * this.pool.length)];
-        if (word === undefined) {
-          throw new AnchorEditError(
-            "Pool is empty; cannot allocate multi-word anchor.",
-            "POOL_EMPTY"
-          );
-        }
-        pieces.push(word);
+        pieces.push(this.pool[Math.floor(Math.random() * this.pool.length)]);
       }
       const candidate = pieces.join("");
       if (!state.usedWords.has(candidate)) {
@@ -371,22 +342,7 @@ export class StateManager {
     if (parts < 4) return this.allocateMultiWord(state, parts + 1);
     throw new AnchorEditError(
       `Anchor allocation failed for ${state.path} after exhausting pool and multi-word fallbacks.`,
-      "POOL_EXHAUSTED"
+      "ANCHOR_POOL_EXHAUSTED"
     );
   }
-}
-
-function translateFsError(err: unknown, path: string): never {
-  if (err instanceof Error && "code" in err && typeof err.code === "string") {
-    if (err.code === "ENOENT") {
-      throw new AnchorEditError(`File not found: ${path}`, "FILE_NOT_FOUND");
-    }
-    if (err.code === "EACCES") {
-      throw new AnchorEditError(`Permission denied: ${path}`, "PERMISSION_DENIED");
-    }
-    if (err.code === "EISDIR") {
-      throw new AnchorEditError(`Path is a directory: ${path}`, "IS_DIRECTORY");
-    }
-  }
-  throw err;
 }

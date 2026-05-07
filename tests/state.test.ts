@@ -326,14 +326,14 @@ describe("StateManager", () => {
     expect(ra.anchors[0]).toBe(rb.anchors[0]);
   });
 
-  test("file-not-found raises FILE_NOT_FOUND", () => {
+  test("missing file propagates native ENOENT", () => {
     const sm = new StateManager();
-    expectAnchorEditError(() => sm.read(join(dir, "missing.txt")), "FILE_NOT_FOUND");
+    expect(() => sm.read(join(dir, "missing.txt"))).toThrow(/ENOENT/);
   });
 
-  test("directory path raises IS_DIRECTORY", () => {
+  test("directory path propagates native EISDIR", () => {
     const sm = new StateManager();
-    expectAnchorEditError(() => sm.read(dir), "IS_DIRECTORY");
+    expect(() => sm.read(dir)).toThrow(/EISDIR/);
   });
 
   test("binary file raises BINARY_FILE", () => {
@@ -470,16 +470,14 @@ describe("StateManager", () => {
     const sm = new StateManager();
     const { anchors: initial } = sm.read(path);
     chmodSync(path, 0o400);
-    expectAnchorEditError(
-      () =>
-        sm.edit({
-          filePath: path,
-          startAnchor: initial[0],
-          newContent: "ALPHA",
-          mode: "replace",
-        }),
-      "PERMISSION_DENIED"
-    );
+    expect(() =>
+      sm.edit({
+        filePath: path,
+        startAnchor: initial[0],
+        newContent: "ALPHA",
+        mode: "replace",
+      })
+    ).toThrow(/EACCES/);
     chmodSync(path, 0o600);
     const reread = sm.read(path);
     expect(reread.lines).toEqual(["alpha", "beta"]);
@@ -580,5 +578,18 @@ describe("StateManager", () => {
     expect(result.affectedRange).toEqual([1, 2]);
     expect(result.postAfterStart).toBe(1);
     expect(result.originalLines.slice(1, 3)).toEqual(["two", "three"]);
+  });
+
+  test("AnchorEditCode wire values are stable", () => {
+    const codes: AnchorEditCode[] = [
+      "ANCHOR_NOT_FOUND",
+      "INVALID_RANGE",
+      "BINARY_FILE",
+      "ANCHOR_POOL_EXHAUSTED",
+    ];
+    for (const code of codes) {
+      const err = new AnchorEditError("x", code);
+      expect(err.code).toBe(code);
+    }
   });
 });
