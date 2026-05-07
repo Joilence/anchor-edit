@@ -6,7 +6,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ANCHOR_SEPARATOR } from "../src/pool.js";
 import { editAnchoredOutput, readAnchoredOutput, writeFileOutput } from "../src/schemas.js";
-import { buildServer } from "../src/server.js";
+import { buildServer, ERROR_CODE_META_KEY } from "../src/server.js";
+import type { StateManager } from "../src/state.js";
 
 interface TextContent {
   type: string;
@@ -17,10 +18,13 @@ interface ToolResult {
   content: TextContent[];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
+  _meta?: Record<string, unknown>;
 }
 
-async function setupClient(): Promise<{ client: Client; close: () => Promise<void> }> {
-  const server = buildServer();
+async function setupClient(
+  state?: StateManager
+): Promise<{ client: Client; close: () => Promise<void> }> {
+  const server = buildServer(state);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "smoke-test", version: "0.0.0" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -89,7 +93,7 @@ describe("MCP server smoke", () => {
     }
   });
 
-  test("AnchorEditError surfaces as isError tool result", async () => {
+  test("missing file surfaces native ENOENT as isError without _meta code", async () => {
     const { client, close } = await setupClient();
     try {
       const result = asToolResult(
@@ -99,7 +103,54 @@ describe("MCP server smoke", () => {
         })
       );
       expect(result.isError).toBe(true);
-      expect(result.content[0]?.text).toContain("File not found");
+      expect(result._meta?.[ERROR_CODE_META_KEY]).toBeUndefined();
+      expect(result.content[0]?.text).toContain("ENOENT");
+    } finally {
+      await close();
+    }
+  });
+
+  test("non-AnchorEditError from state surfaces as isError without _meta code", async () => {
+    const fake = {
+      read: () => {
+        throw new TypeError("boom");
+      },
+    } as unknown as StateManager;
+    const { client, close } = await setupClient(fake);
+    try {
+      const result = asToolResult(
+        await client.callTool({
+          name: "read_anchored",
+          arguments: { file_path: join(dir, "x.txt") },
+        })
+      );
+      expect(result.isError).toBe(true);
+      expect(result._meta?.[ERROR_CODE_META_KEY]).toBeUndefined();
+      expect(result.content[0]?.text).toContain("boom");
+    } finally {
+      await close();
+    }
+  });
+
+  test("ANCHOR_NOT_FOUND surfaces as isError with _meta code", async () => {
+    const path = join(dir, "x.txt");
+    writeFileSync(path, "alpha\nbeta", "utf8");
+    const { client, close } = await setupClient();
+    try {
+      await client.callTool({ name: "read_anchored", arguments: { file_path: path } });
+      const result = asToolResult(
+        await client.callTool({
+          name: "edit_anchored",
+          arguments: {
+            file_path: path,
+            start_anchor: "NotARealAnchor",
+            new_content: "x",
+            mode: "replace",
+          },
+        })
+      );
+      expect(result.isError).toBe(true);
+      expect(result._meta?.[ERROR_CODE_META_KEY]).toBe("ANCHOR_NOT_FOUND");
     } finally {
       await close();
     }
@@ -169,6 +220,7 @@ describe("MCP server smoke", () => {
       );
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toContain("end_anchor is only valid with mode=replace");
+      expect(result._meta?.[ERROR_CODE_META_KEY]).toBe("INVALID_RANGE");
       expect(readFileSync(path, "utf8")).toBe("alpha\nbeta\ngamma");
     } finally {
       await close();

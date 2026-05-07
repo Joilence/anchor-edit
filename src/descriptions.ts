@@ -20,3 +20,6 @@ export const NEW_CONTENT_DESCRIPTION =
 
 export const START_ANCHOR_DESCRIPTION =
   "Anchor of the first line in the edit range. Required for all modes.";
+
+export const MCP_ERROR_META_NOTE =
+  ' On a domain failure, the MCP response sets isError=true and _meta["anchor-edit.dev/errorCode"] to a value from the AnchorEditCode union exported by this package. Clients should treat unknown codes as the generic class. Other failures (filesystem, OS, programmer errors) surface as isError=true without _meta; read content[0].text for the underlying message.';

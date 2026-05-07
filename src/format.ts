@@ -2,19 +2,13 @@ import type { z } from "zod";
 import { CONTEXT_LINES } from "./descriptions.js";
 import { ANCHOR_SEPARATOR } from "./pool.js";
 import type { editAnchoredOutput, readAnchoredOutput, writeFileOutput } from "./schemas.js";
-import { type AddedRange, AnchorEditError, type EditResult, type ReadResult } from "./state.js";
+import type { AddedRange, EditResult, ReadResult } from "./state.js";
 
 export type ReadStructured = z.infer<typeof readAnchoredOutput>;
 export type EditStructured = z.infer<typeof editAnchoredOutput>;
 export type WriteStructured = z.infer<typeof writeFileOutput>;
 
 export function formatLines(anchors: readonly string[], lines: readonly string[]): string {
-  if (anchors.length !== lines.length) {
-    throw new AnchorEditError(
-      `Mismatched anchors (${anchors.length}) and lines (${lines.length})`,
-      "FORMAT_MISMATCH"
-    );
-  }
   const out: string[] = [];
   for (let i = 0; i < anchors.length; i++) {
     out.push(`${anchors[i]}${ANCHOR_SEPARATOR}${lines[i]}`);
