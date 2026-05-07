@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.3](https://github.com/Joilence/anchor-edit/compare/v0.0.2...v0.0.3) (2026-05-07)
+
+
+### Features
+
+* **mcp:** structured tool outputs and delete mode ([#4](https://github.com/Joilence/anchor-edit/issues/4)) ([ed69fb2](https://github.com/Joilence/anchor-edit/commit/ed69fb2f9a1b3414e0d4dd9b7def763fc04f15e6))
+* **mcp:** surface domain error codes via _meta ([#6](https://github.com/Joilence/anchor-edit/issues/6)) ([6f8fd83](https://github.com/Joilence/anchor-edit/commit/6f8fd830ff04af8ebcfad84a284c011fdd44542a))
+
 ## [0.0.2](https://github.com/Joilence/anchor-edit/compare/v0.0.1...v0.0.2) (2026-05-04)
 
 
