@@ -36,14 +36,15 @@
   "main": "./dist/server.js",
   "types": "./dist/server.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "index.js"
   ],
   "publishConfig": {
     "access": "public"
   },
   "pi": {
     "extensions": [
-      "./dist/pi-extension.js"
+      "./index.js"
     ]
   },
   "scripts": {
