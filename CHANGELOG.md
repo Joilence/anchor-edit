@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.4](https://github.com/Joilence/anchor-edit/compare/v0.0.3...v0.0.4) (2026-05-09)
+
+
+### Bug Fixes
+
+* enable npm publish and clean pi ext label ([#7](https://github.com/Joilence/anchor-edit/issues/7)) ([82f9a23](https://github.com/Joilence/anchor-edit/commit/82f9a23a200c889015eb136b0d654b3eab9aa8ae))
+
 ## [0.0.3](https://github.com/Joilence/anchor-edit/compare/v0.0.2...v0.0.3) (2026-05-07)
 
 
