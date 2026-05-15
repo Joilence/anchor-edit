@@ -1,6 +1,11 @@
 import { isAbsolute, resolve } from "node:path";
 import { StringEnum } from "@mariozechner/pi-ai";
-import { type ExtensionAPI, withFileMutationQueue } from "@mariozechner/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type Theme,
+  withFileMutationQueue,
+} from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "typebox";
 import {
   EDIT_ANCHORED_DESCRIPTION,
@@ -11,7 +16,22 @@ import {
   START_ANCHOR_DESCRIPTION,
   WRITE_TO_FILE_DESCRIPTION,
 } from "./descriptions.js";
-import { buildEditResult, buildReadResult, buildWriteResult } from "./format.js";
+import {
+  anchorColumnWidth,
+  buildEditDisplayEntries,
+  buildEditResult,
+  buildReadDisplay,
+  buildReadResult,
+  buildWriteResult,
+  type DisplayEntry,
+  type DisplayLine,
+  displayAnchoredChrome,
+  displayAnchoredLine,
+  displayEllipsis,
+  type EditStructured,
+  type ReadStructured,
+  type WriteStructured,
+} from "./format.js";
 import { ANCHOR_SEPARATOR } from "./pool.js";
 import { AnchorEditError, EDIT_MODES, StateManager } from "./state.js";
 
@@ -94,11 +114,48 @@ function resolveToolPath(path: string, cwd: string): string {
   return isAbsolute(normalized) ? normalized : resolve(cwd, normalized);
 }
 
+interface ReadPiDetails extends ReadStructured {
+  display_text: string;
+}
+
+interface EditPiDetails extends EditStructured {
+  diff: string;
+}
+
+function textResult(text: string): { type: "text"; text: string }[] {
+  return [{ type: "text", text }];
+}
+
+function firstText(result: { content: { type: string; text?: string }[] }): string {
+  const first = result.content[0];
+  return first?.type === "text" && typeof first.text === "string" ? first.text : "";
+}
+
+function renderToolCall(toolName: string, path: string, theme: Theme): Text {
+  return new Text(
+    theme.fg("toolTitle", theme.bold(`${toolName} `)) + theme.fg("muted", path),
+    0,
+    0
+  );
+}
+
+function renderDiffText(diff: string, theme: Theme): Text {
+  const text = diff
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("+")) return theme.fg("toolDiffAdded", line);
+      if (line.startsWith("-")) return theme.fg("toolDiffRemoved", line);
+      return theme.fg("toolDiffContext", line);
+    })
+    .join("\n");
+  return new Text(text, 0, 0);
+}
+
 export function registerAnchorEditPiTools(
   pi: PiToolRegistrar,
   state: StateManager = new StateManager()
 ): void {
-  pi.registerTool({
+  pi.registerTool<typeof readAnchoredParams, ReadPiDetails>({
     name: "read_anchored",
     label: "read anchored",
     description: READ_ANCHORED_DESCRIPTION,
@@ -112,16 +169,25 @@ export function registerAnchorEditPiTools(
       const path = resolveToolPath(params.path, ctx.cwd);
       return withFileMutationQueue(path, async () => {
         const result = state.read(path, params.offset, params.limit);
-        const { text } = buildReadResult(result, result.totalLines);
+        const { text, structured } = buildReadResult(result, result.totalLines);
         return {
-          content: [{ type: "text", text }],
-          details: undefined,
+          content: textResult(text),
+          details: {
+            ...structured,
+            display_text: buildReadDisplay(result, params.offset ?? 0),
+          },
         };
       });
     },
+    renderCall(args, theme) {
+      return renderToolCall("read_anchored", args.path, theme);
+    },
+    renderResult(result) {
+      return new Text(result.details?.display_text ?? firstText(result), 0, 0);
+    },
   });
 
-  pi.registerTool({
+  pi.registerTool<typeof editAnchoredParams, EditPiDetails>({
     name: "edit_anchored",
     label: "edit anchored",
     description: EDIT_ANCHORED_DESCRIPTION,
@@ -150,16 +216,30 @@ export function registerAnchorEditPiTools(
           newContent: params.new_content ?? "",
           mode,
         });
-        const { text } = buildEditResult(result, params.new_content ?? "");
+        const { text, structured } = buildEditResult(result, params.new_content ?? "");
+        const { entries, lineWidth } = buildEditDisplayEntries(result);
         return {
-          content: [{ type: "text", text }],
-          details: undefined,
+          content: textResult(text),
+          details: {
+            ...structured,
+            diff: buildEditDisplay(result),
+          },
         };
       });
     },
+    renderCall(args, theme) {
+      return renderToolCall("edit_anchored", args.path, theme);
+    },
+    renderResult(result, _options, theme) {
+      const entries = result.details?.displayEntries;
+      const lineWidth = result.details?.displayLineWidth;
+      return entries && lineWidth !== undefined
+        ? renderDiffEntries(entries, lineWidth, theme)
+        : new Text(firstText(result), 0, 0);
+    },
   });
 
-  pi.registerTool({
+  pi.registerTool<typeof writeFileParams, WriteStructured>({
     name: "write_to_file",
     label: "write anchored file",
     description: WRITE_TO_FILE_DESCRIPTION,
@@ -173,12 +253,18 @@ export function registerAnchorEditPiTools(
       const path = resolveToolPath(params.path, ctx.cwd);
       return withFileMutationQueue(path, async () => {
         const result = state.write(path, params.content);
-        const { text } = buildWriteResult(result.lines.length, result.addedRanges);
+        const { text, structured } = buildWriteResult(result.lines.length, result.addedRanges);
         return {
-          content: [{ type: "text", text }],
-          details: undefined,
+          content: textResult(text),
+          details: structured,
         };
       });
+    },
+    renderCall(args, theme) {
+      return renderToolCall("write_to_file", args.path, theme);
+    },
+    renderResult(result) {
+      return new Text(firstText(result), 0, 0);
     },
   });
 }

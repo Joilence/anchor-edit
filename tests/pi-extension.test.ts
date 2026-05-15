@@ -56,6 +56,17 @@ function resultText(result: AgentToolResult<unknown>): string {
   return first.text;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function detailString(result: AgentToolResult<unknown>, key: string): string {
+  if (!isRecord(result.details)) throw new Error("Expected result details");
+  const value = result.details[key];
+  if (typeof value !== "string") throw new Error(`Expected string detail: ${key}`);
+  return value;
+}
+
 function anchorAt(result: AgentToolResult<unknown>, index: number): string {
   const line = resultText(result).split("\n")[index];
   if (line === undefined) throw new Error(`Missing anchored line at index ${index}`);
@@ -129,6 +140,9 @@ describe("pi extension", () => {
     expect(text).toContain(`${ANCHOR_SEPARATOR}beta`);
     expect(text).not.toContain("alpha");
     expect(text).not.toContain("gamma");
+    expect(detailString(result, "display_text")).toBe(
+      ` 2 ${anchorAt(result, 0)}${ANCHOR_SEPARATOR} beta`
+    );
   });
 
   test("prepareArguments accepts MCP-style file_path", () => {
