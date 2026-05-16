@@ -1,6 +1,6 @@
 {
   "name": "anchor-edit",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Stateful single-token anchored file editing (Dirac-style). MCP server via `anchor-edit mcp`.",
   "license": "MIT",
   "author": "Joilence <14588641+Joilence@users.noreply.github.com>",
