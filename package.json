@@ -50,6 +50,8 @@
   "scripts": {
     "build": "bunup && chmod +x dist/bin.js",
     "build:pool": "bun run scripts/build-pool.ts",
+    "link:pi": "pnpm run build && pi install \"$PWD\"",
+    "unlink:pi": "pi remove \"$PWD\"",
     "dev": "bun --watch src/bin.ts",
     "test": "bun test",
     "lint": "biome check .",
