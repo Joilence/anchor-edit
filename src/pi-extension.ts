@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { StringEnum } from "@mariozechner/pi-ai";
 import {
@@ -6,6 +7,7 @@ import {
   withFileMutationQueue,
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { diffWords } from "diff";
 import { type Static, Type } from "typebox";
 import {
   EDIT_ANCHORED_DESCRIPTION,
@@ -119,7 +121,8 @@ interface ReadPiDetails extends ReadStructured {
 }
 
 interface EditPiDetails extends EditStructured {
-  diff: string;
+  displayEntries: readonly DisplayEntry[];
+  displayLineWidth: number;
 }
 
 function textResult(text: string): { type: "text"; text: string }[] {
@@ -131,24 +134,129 @@ function firstText(result: { content: { type: string; text?: string }[] }): stri
   return first?.type === "text" && typeof first.text === "string" ? first.text : "";
 }
 
+function shortenPath(path: string): string {
+  const home = homedir();
+  if (!home || !path.startsWith(home)) return path;
+  const rest = path.slice(home.length);
+  if (rest === "" || rest.startsWith("/") || rest.startsWith("\\")) return `~${rest}`;
+  return path;
+}
+
+// 3-space tabs match pi's convention.
+function normalizeForDisplay(text: string): string {
+  return text.replace(/\t/g, "   ").replace(/\r/g, "");
+}
+
 function renderToolCall(toolName: string, path: string, theme: Theme): Text {
   return new Text(
-    theme.fg("toolTitle", theme.bold(`${toolName} `)) + theme.fg("muted", path),
+    theme.fg("toolTitle", theme.bold(`${toolName} `)) + theme.fg("muted", shortenPath(path)),
     0,
     0
   );
 }
 
-function renderDiffText(diff: string, theme: Theme): Text {
-  const text = diff
-    .split("\n")
-    .map((line) => {
-      if (line.startsWith("+")) return theme.fg("toolDiffAdded", line);
-      if (line.startsWith("-")) return theme.fg("toolDiffRemoved", line);
-      return theme.fg("toolDiffContext", line);
-    })
-    .join("\n");
-  return new Text(text, 0, 0);
+function renderIntraLineDiff(
+  oldText: string,
+  newText: string,
+  theme: Theme
+): { removedSuffix: string; addedSuffix: string } {
+  const parts = diffWords(oldText, newText);
+  let removedSuffix = "";
+  let addedSuffix = "";
+  // Leading whitespace on the first removed/added part is indent that the user
+  // did not change; render it plain so the inverse highlight covers only the
+  // word that actually differs.
+  let isFirstRemoved = true;
+  let isFirstAdded = true;
+  for (const part of parts) {
+    if (part.removed) {
+      let value = part.value;
+      if (isFirstRemoved) {
+        const lead = value.match(/^\s*/)?.[0] ?? "";
+        value = value.slice(lead.length);
+        removedSuffix += lead;
+        isFirstRemoved = false;
+      }
+      if (value) removedSuffix += theme.inverse(value);
+    } else if (part.added) {
+      let value = part.value;
+      if (isFirstAdded) {
+        const lead = value.match(/^\s*/)?.[0] ?? "";
+        value = value.slice(lead.length);
+        addedSuffix += lead;
+        isFirstAdded = false;
+      }
+      if (value) addedSuffix += theme.inverse(value);
+    } else {
+      removedSuffix += part.value;
+      addedSuffix += part.value;
+    }
+  }
+  return { removedSuffix, addedSuffix };
+}
+
+function renderLine(line: DisplayLine, lineWidth: number, anchorWidth: number): string {
+  return normalizeForDisplay(displayAnchoredLine(line, lineWidth, anchorWidth));
+}
+
+function renderDiffEntries(
+  entries: readonly DisplayEntry[],
+  lineWidth: number,
+  theme: Theme
+): Text {
+  const anchorWidth = anchorColumnWidth(entries);
+  const out: string[] = [];
+  let i = 0;
+  while (i < entries.length) {
+    const entry = entries[i];
+    if (entry.kind === "ellipsis") {
+      out.push(theme.fg("toolDiffContext", displayEllipsis(lineWidth, anchorWidth)));
+      i++;
+      continue;
+    }
+    const prefix = entry.line.prefix;
+    if (prefix === "-") {
+      const removed: DisplayLine[] = [];
+      while (i < entries.length) {
+        const e = entries[i];
+        if (e.kind !== "line" || e.line.prefix !== "-") break;
+        removed.push(e.line);
+        i++;
+      }
+      const added: DisplayLine[] = [];
+      while (i < entries.length) {
+        const e = entries[i];
+        if (e.kind !== "line" || e.line.prefix !== "+") break;
+        added.push(e.line);
+        i++;
+      }
+      if (removed.length === 1 && added.length === 1) {
+        const removedChrome = displayAnchoredChrome(removed[0], lineWidth, anchorWidth);
+        const addedChrome = displayAnchoredChrome(added[0], lineWidth, anchorWidth);
+        const { removedSuffix, addedSuffix } = renderIntraLineDiff(
+          normalizeForDisplay(removed[0].line),
+          normalizeForDisplay(added[0].line),
+          theme
+        );
+        out.push(theme.fg("toolDiffRemoved", removedChrome + removedSuffix));
+        out.push(theme.fg("toolDiffAdded", addedChrome + addedSuffix));
+      } else {
+        for (const r of removed) {
+          out.push(theme.fg("toolDiffRemoved", renderLine(r, lineWidth, anchorWidth)));
+        }
+        for (const a of added) {
+          out.push(theme.fg("toolDiffAdded", renderLine(a, lineWidth, anchorWidth)));
+        }
+      }
+    } else if (prefix === "+") {
+      out.push(theme.fg("toolDiffAdded", renderLine(entry.line, lineWidth, anchorWidth)));
+      i++;
+    } else {
+      out.push(theme.fg("toolDiffContext", renderLine(entry.line, lineWidth, anchorWidth)));
+      i++;
+    }
+  }
+  return new Text(out.join("\n"), 0, 0);
 }
 
 export function registerAnchorEditPiTools(
@@ -183,7 +291,7 @@ export function registerAnchorEditPiTools(
       return renderToolCall("read_anchored", args.path, theme);
     },
     renderResult(result) {
-      return new Text(result.details?.display_text ?? firstText(result), 0, 0);
+      return new Text(normalizeForDisplay(result.details?.display_text ?? firstText(result)), 0, 0);
     },
   });
 
@@ -222,7 +330,8 @@ export function registerAnchorEditPiTools(
           content: textResult(text),
           details: {
             ...structured,
-            diff: buildEditDisplay(result),
+            displayEntries: entries,
+            displayLineWidth: lineWidth,
           },
         };
       });
@@ -264,7 +373,7 @@ export function registerAnchorEditPiTools(
       return renderToolCall("write_to_file", args.path, theme);
     },
     renderResult(result) {
-      return new Text(firstText(result), 0, 0);
+      return new Text(normalizeForDisplay(firstText(result)), 0, 0);
     },
   });
 }
