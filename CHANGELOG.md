@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/Joilence/anchor-edit/compare/v0.0.4...v0.0.5) (2026-05-16)
+
+
+### Features
+
+* **pi:** render hooks with line numbers and diff ([#9](https://github.com/Joilence/anchor-edit/issues/9)) ([e73eff7](https://github.com/Joilence/anchor-edit/commit/e73eff7c2cd9c6ffb2b6afe7004bf8c7bbb4ea12))
+
 ## [0.0.4](https://github.com/Joilence/anchor-edit/compare/v0.0.3...v0.0.4) (2026-05-09)
 
 
