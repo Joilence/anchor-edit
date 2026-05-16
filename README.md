@@ -44,6 +44,8 @@ Restart pi, or run `/reload` in an existing pi session. The extension registers:
 
 Paths may be relative to pi's current working directory or absolute. The extension keeps anchor state in memory for the active pi runtime. After `/reload`, restart, `/new`, `/resume`, or `/fork`, call `read_anchored` again before `edit_anchored`.
 
+The pi renderer adds line numbers to read output and a unified-diff view for edits with intra-line word highlighting for single-line replacements. The MCP `content[0].text` payload is unchanged.
+
 For local development from this repository:
 
 ```sh
